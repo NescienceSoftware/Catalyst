@@ -1,0 +1,82 @@
+from __future__ import division
+import os
+import pytz
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+from datetime import datetime
+
+from catalyst.api import order,record, symbols, order_target_percent,schedule_function,date_rules,time_rules
+from catalyst.utils.run_algo import run_algorithm
+from catalyst.exchange.utils.stats_utils import extract_transactions
+def initialize(context):
+    # Portfolio assetss list
+    context.assets = symbols('btc_usd', 'eth_usd', 'ltc_usd', 'xrp_usd',
+                             'xmr_usd')
+
+    context.bought = False
+    risk_level = 5
+    risk_based_allocation = {0: (0.2,0.2,0.2,0.2,0.2),
+                             1: (0.2,0.2,0.2,0.2,0.2),
+                             2: (0.2,0.2,0.2,0.2,0.2),
+                             3: (0.2,0.2,0.2,0.2,0.2),
+                             4: (0.2,0.2,0.2,0.2,0.2),
+                             5: (0.198,0.198,0.198,0.198,0.198),
+                             6: (0.2,0.2,0.2,0.2,0.2),
+                             7: (0.2,0.2,0.2,0.2,0.2),
+                             8: (0.2,0.2,0.2,0.2,0.2),
+                             9: (0.2,0.2,0.2,0.2,0.2),
+                             10: (0.2,0.2,0.2,0.2,0.2)}
+    #Saves the weights to easily access during rebalance
+    context.target_allocation = dict(zip(context.assets, risk_based_allocation[risk_level]))
+    schedule_function(rebalanceInit, date_rules.every_day())
+    #schedule_function(rebalanceInit, date_rules.week_start(days_offset=3),time_rules.market_open(minutes=480))
+
+    #Same as periodic threshold
+    #schedule_function(rebalanceBB, date_rules.week_start(days_offset=3),time_rules.market_open(minutes=480))
+
+    #schedule_function(rebalanceInit, date_rules.every_day(),time_rules.market_price(hours=1))
+
+    context.i=0
+    context.base_price = None
+def rebalanceInit(context, data):
+    #total value of portfolio
+    value = context.portfolio.portfolio_value
+    for asset in context.assets:
+        if (context.target_allocation[asset] == 0):
+            continue
+        current_holdings = data.current(asset,'price') * context.portfolio.positions[asset].amount
+        weight = current_holdings/value
+        growth = float(weight) / float(context.target_allocation[asset])
+        #if weights of any position exceed threshold, trigger rebalance
+
+        if (growth >= 1.02 or growth <= 0.98):
+            rebalance(context, data)
+            break
+    print("No need to rebalance!")
+
+def rebalance(context, data):
+
+    for asset in context.assets:
+        current_weight = (data.current(asset, 'price') * context.portfolio.positions[asset].amount) / context.portfolio.portfolio_value
+        target_weight = context.target_allocation[asset]
+        distance = current_weight - target_weight
+        if (distance > 0):
+            amount = -1 * (distance * context.portfolio.portfolio_value) / data.current(asset,'price')
+            if (int(amount) == 0):
+                continue
+            print("Selling " + str(int(amount)) + " shares of " + str(asset))
+            order(asset, amount)
+    for asset in context.assets:
+        current_weight = (data.current(asset, 'price') * context.portfolio.positions[asset].amount) / context.portfolio.portfolio_value
+        target_weight = context.target_allocation[asset]
+        distance = current_weight - target_weight
+        if (distance < 0):
+            amount = -1 * (distance * context.portfolio.portfolio_value) / data.current(asset,'price')
+            if (int(amount) == 0):
+                continue
+            print("Buying " + str(int(amount)) + " shares of " + str(asset))
+            order(asset, amount)
+
+    for asset in context.assets:
+            order_target_percent(asset, context.target_allocation[asset])
